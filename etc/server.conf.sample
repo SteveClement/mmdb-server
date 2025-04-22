@@ -3,3 +3,4 @@ mmdb_file = db/GeoOpen-Country.mmdb,db/GeoOpen-Country-ASN.mmdb
 country_file = db/country.json
 lookup_pubsub = no 
 port = 8000
+detect_border_ip = yes

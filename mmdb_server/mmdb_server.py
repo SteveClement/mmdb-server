@@ -22,6 +22,7 @@ mmdb_file = config['global'].get('mmdb_file')
 pubsub = config['global'].getboolean('lookup_pubsub')
 port = config['global'].getint('port')
 country_file = config['global'].get('country_file')
+detect_border_ip = config['global'].getboolean('detect_border_ip', True)  # Default to True
 
 mmdb_files = mmdb_file.split(",")
 
@@ -53,6 +54,31 @@ def validIPAddress(IP: str) -> bool:
         return False
 
 
+def get_client_ip(access_route):
+    """
+    Determine the client IP address, considering border IP when request comes from localhost.
+    If the first IP in access_route is a localhost address, look for the first non-localhost IP.
+    Returns the first non-localhost IP found or the original IP if all are localhost.
+    """
+    if not access_route:
+        return None
+    
+    try:
+        first_ip = ip_address(access_route[0])
+        if first_ip.is_loopback and len(access_route) > 1 and config['global'].getboolean('detect_border_ip', True):
+            for ip_str in access_route[1:]:
+                try:
+                    ip = ip_address(ip_str)
+                    if not ip.is_loopback:
+                        return ip_str
+                except ValueError:
+                    continue
+        
+        return access_route[0]
+    except ValueError:
+        return access_route[0]  # In case ip_address conversion fails
+
+
 def pubLookup(value: str) -> bool:
     if not pubsub:
         return False
@@ -75,11 +101,12 @@ class GeoLookup:
         ret = []
         ua = req.get_header('User-Agent')
         ips = req.access_route
+        client_ip = get_client_ip(ips)
         if not validIPAddress(value):
             resp.status = falcon.HTTP_422
             resp.media = "IPv4 or IPv6 address is in an incorrect format. Dotted decimal for IPv4 or textual representation for IPv6 are required."
             return
-        pubLookup(value=f'{value} via {ips} using {ua}')
+        pubLookup(value=f'{value} via {client_ip} (from {ips[0]}) using {ua}')
         for mmdb in mmdbs:
             m = {}
             georesult = mmdb['reader'].get(value)
@@ -100,12 +127,13 @@ class MyGeoLookup:
     def on_get(self, req, resp):
         ret = []
         ips = req.access_route
+        client_ip = get_client_ip(ips)
         for mmdb in mmdbs:
-            georesult = mmdb['reader'].get(ips[0])
+            georesult = mmdb['reader'].get(client_ip)
             m = mmdb.copy()
             del m['reader']
             georesult['meta'] = m
-            georesult['ip'] = ips[0]
+            georesult['ip'] = client_ip
             if georesult['country']['iso_code'] != 'None':
                 georesult['country_info'] = countryLookup(country=georesult['country']['iso_code'])
             else:
